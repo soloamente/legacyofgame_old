@@ -1,0 +1,54 @@
+name: Deploy via SSH
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+      
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install Dependencies
+        run: pnpm install
+
+      - name: Build Project
+        run: pnpm build
+      
+      - name: Set up SSH key
+        run: |
+          which ssh-agent || (sudo apk update && sudo apk add openssh-client)
+          which rsync || (sudo apk update && sudo apk add rsync)
+          mkdir -p ~/.ssh
+          touch ~/.ssh/private.key
+          touch ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/private.key
+          echo -e "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > ~/.ssh/private.key
+          # Append keyscan output into known hosts
+          ssh-keyscan ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Deploy with rsync
+        env:
+          REMOTE_PATH: /var/www/html/canary
+        run: |
+          eval $(ssh-agent -s)
+          ssh-add ~/.ssh/private.key
+          echo "Deploy to dev environment"
+          rsync --rsync-path=/usr/bin/rsync --delete -avuz --exclude=".*" ./dist/ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:$REMOTE_PATH/
